@@ -1,0 +1,15 @@
+let
+    Source = Table.FromList
+    (
+        {
+            [Column1="UTC Offset", Offset = #"UTC Offset Hours"]
+        },
+        Record.FieldValues,
+        {
+            "Description",
+            "Offset"
+        }
+    ),
+    #"Changed Type" = Table.TransformColumnTypes(Source,{{"Offset", type number}})
+in
+    #"Changed Type"

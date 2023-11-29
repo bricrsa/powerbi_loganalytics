@@ -1,0 +1,33 @@
+//from https://blog.crossjoin.co.uk/2023/07/30/exploring-power-bi-import-mode-throughput-with-log-analytics-part-3-throughput-variations-during-a-refresh/
+//for refreshes look in OperationName for ProgressReportBegin, ProgressReportCurrent,ProgressReportEnd
+// with OperationDetailName of ExecuteSql, ReadData, Tabular Refresh
+
+PowerBIDatasetsWorkspace
+| where TimeGenerated > ago(1d)
+| where OperationName == "ProgressReportCurrent" or OperationName=="ProgressReportBegin" or OperationName == "ProgressReportEnd"
+| where XmlaObjectPath!=""
+| where OperationDetailName=="ReadData"
+| project OperationName, XmlaObjectPath, EventText, TimeGenerated, ProgressCounter, OperationDetailName, XmlaRequestId, ObjectPathRequestId = strcat(XmlaObjectPath ,XmlaRequestId)
+| partition by ObjectPathRequestId
+(
+    sort by TimeGenerated asc
+    | scan declare( PrevEventTimeGenerated:datetime, TimeSincePrevEvent:timespan=time(0s), TimeSinceRefreshBegin:timespan=time(0s), NumberOfRowsRead:int=0) with 
+    (
+        step RefreshStarts: OperationName=="ProgressReportBegin";
+        step RefreshInProgress: OperationName == "ProgressReportCurrent" =>
+            PrevEventTimeGenerated = iff(ProgressCounter==10000, RefreshStarts.TimeGenerated, RefreshInProgress.TimeGenerated),
+            TimeSincePrevEvent = iff(ProgressCounter==10000, TimeGenerated - RefreshStarts.TimeGenerated, TimeGenerated-RefreshInProgress.TimeGenerated),
+            TimeSinceRefreshBegin = TimeGenerated - RefreshStarts.TimeGenerated,
+            NumberOfRowsRead = iff(ProgressCounter==10000, 10000, ProgressCounter-RefreshInProgress.ProgressCounter);
+        step RefreshEnds: OperationName == "ProgressReportEnd" => 
+            PrevEventTimeGenerated = RefreshInProgress.TimeGenerated,
+            TimeSincePrevEvent = TimeGenerated - RefreshInProgress.TimeGenerated,
+            TimeSinceRefreshBegin = TimeGenerated - RefreshStarts.TimeGenerated,
+            NumberOfRowsRead = ProgressCounter - RefreshInProgress.ProgressCounter;
+    )
+    | where OperationName == "ProgressReportCurrent" or OperationName == "ProgressReportEnd"
+)
+| project XmlaObjectPath, Table = split(XmlaObjectPath,".", 2)[0], Partition = split(XmlaObjectPath,".", 3)[0], OperationName, 
+StartTime = format_datetime(PrevEventTimeGenerated,'yyyy-MM-dd HH:mm:ss.fff' ), EndTime = format_datetime(TimeGenerated,'yyyy-MM-dd HH:mm:ss.fff' ), 
+ProgressCounter, SecondsSincePreviousEvent = TimeSincePrevEvent/1s, SecondsSinceRefreshBegin=TimeSinceRefreshBegin/1s,NumberOfRowsRead, 
+NumberOfRowsReadPerSecond=NumberOfRowsRead/(TimeSincePrevEvent/1s), XmlaRequestId

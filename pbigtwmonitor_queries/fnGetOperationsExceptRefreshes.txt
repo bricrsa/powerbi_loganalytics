@@ -1,0 +1,54 @@
+let
+    Source = (#"Days Ago To Start" as number, #"Days Ago To Finish" as number,#"Hours" as number,#"Pagination Hours" as number, #"Log Analytics Table" as text, #"UTC Offset Hours" as number) => let AnalyticsQuery =
+let Source = Json.Document(Web.Contents("https://api.loganalytics.io/v1/workspaces/" & GetWorkspaceId & "/query", 
+[Query=[#"query"="
+set notruncation;
+let workspaceIdList = dynamic(['50EA7149-43DC-4DE3-8E56-4D5DBBC83E8F', 'C839BDCB-81B5-4DC3-9F92-818FE71432A1', '80FA5101-D77B-4AC3-B86A-EEAFE28E64AC']);
+
+
+let startDate = startofday(ago(" & Number.ToText(#"Days Ago To Start") & "d))- "& Number.ToText(#"UTC Offset Hours" * 60) & "m ;
+let startIngestionTime = datetime_add('hour', " & Number.ToText(#"Hours") & ",todatetime(startDate));
+let endIngestionTime = datetime_add('hour', " & Number.ToText(#"Pagination Hours") & ",todatetime(startIngestionTime));
+
+" & #"Log Analytics Table" & " 
+    | where TimeGenerated >= startIngestionTime and TimeGenerated < endIngestionTime
+    | where OperationName  in ('DiscoverEnd', 'QueryEnd', 'Error', 'Deadlock', 'SessionInitialize')
+    | where not (OperationName  == 'CommandEnd' and OperationDetailName == 'Batch' and EventText contains_cs '<Refresh xmlns=')  // remove refreshes. We add them in Power Query
+    | extend Sources = parse_json(ApplicationContext).Sources
+    | mv-expand Sources
+    | extend ReportId = tostring(parse_json(Sources).ReportId)
+    | extend TextDataHash = hash(EventText)
+    | extend DurationMs = coalesce(DurationMs, 0)
+    | extend User = iff(toupper(PowerBIWorkspaceId) in (workspaceIdList), hash_md5(User), User)
+    | extend ExecutingUser = iff(toupper(PowerBIWorkspaceId) in (workspaceIdList), hash_md5(ExecutingUser), ExecutingUser)
+    | distinct  ApplicationName, CpuTimeMs, ArtifactId, ArtifactName, ArtifactKind, DatasetMode, DurationMs, EventText, ExecutingUser, OperationDetailName, OperationName, PremiumCapacityId, ReportId, SourceSystem, Status, StatusCode, TenantId, TextDataHash, TimeGenerated, Type, User, PowerBIWorkspaceId, PowerBIWorkspaceName, XmlaRequestId, XmlaSessionId, _ResourceId, _SubscriptionId
+    | extend QuerySubeventKey = case(
+        OperationName == 'QueryEnd' and isnotempty(XmlaRequestId), XmlaRequestId,  // add rootActivityId as the key if this is a QueryEnd. This joins to the Suboperation table.
+        dynamic(null)) // if we are not expecting subevents then make this null. In PowerQuery we will add a dummy index value for null values to keep this column unique for the 1:* relationship
+    | project-rename DatasetId = ArtifactId, Dataset = ArtifactName, StartTime = TimeGenerated, ResourceId = _ResourceId, SubscriptionId = _SubscriptionId,  ['Duration (ms)'] = DurationMs
+"],Timeout=#duration(0,0,60,0)])),
+TypeMap = #table(
+{ "AnalyticsTypes", "Type" }, 
+{ 
+{ "string",   Text.Type },
+{ "int",      Int32.Type },
+{ "long",     Int64.Type },
+{ "real",     Double.Type },
+{ "timespan", Duration.Type },
+{ "datetime", DateTimeZone.Type },
+{ "bool",     Logical.Type },
+{ "guid",     Text.Type },
+{ "dynamic",  Text.Type }
+}),
+DataTable = Source[tables]{0},
+Columns = Table.FromRecords(DataTable[columns]),
+ColumnsWithType = Table.Join(Columns, {"type"}, TypeMap , {"AnalyticsTypes"}),
+Rows = Table.FromRows(DataTable[rows], Columns[name]), 
+Table = Table.TransformColumnTypes(Rows, Table.ToList(ColumnsWithType, (c) => { c{0}, c{3}}))
+in
+Table
+    
+in
+    AnalyticsQuery
+in
+    Source

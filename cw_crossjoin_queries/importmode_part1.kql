@@ -1,0 +1,14 @@
+//from https://blog.crossjoin.co.uk/2023/07/16/exploring-power-bi-import-mode-throughput-with-log-analytics-part-1-the-events/
+//for refreshes look in OperationName for ProgressReportBegin, ProgressReportCurrent,ProgressReportEnd
+// with OperationDetailName of ExecuteSql, ReadData, Tabular Refresh
+
+let RefreshId = "e5edc0de-f223-4c78-8e2d-01f24b13ccdc";
+let PartitionObjectPath = "28fc7514-d202-4969-922a-ec86f98a7ea2.Model.TIME.TIME-ffca8cb8-1570-4f62-8f04-993c1d1d17cb";
+PowerBIDatasetsWorkspace
+| where TimeGenerated > ago(3d)
+| where XmlaRequestId == RefreshId
+| where XmlaObjectPath == PartitionObjectPath
+| where OperationDetailName == "ExecuteSql" or OperationDetailName == "ReadData" or OperationDetailName == "TabularRefresh"
+| project XmlaObjectPath, Table = split(XmlaObjectPath,".", 2)[0], Partition = split(XmlaObjectPath,".", 3)[0], 
+TimeGenerated, OperationName, OperationDetailName, EventText, DurationMs, CpuTimeMs, ProgressCounter
+| order by XmlaObjectPath, TimeGenerated asc;

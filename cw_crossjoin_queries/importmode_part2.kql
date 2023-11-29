@@ -1,0 +1,49 @@
+//from https://blog.crossjoin.co.uk/2023/07/23/exploring-power-bi-import-mode-throughput-with-log-analytics-part-2-high-level-statistics/
+//for refreshes look in OperationName for ProgressReportBegin, ProgressReportCurrent,ProgressReportEnd
+// with OperationDetailName of ExecuteSql, ReadData, Tabular Refresh
+
+//Headline stats for partition refresh with one row for each partition and refresh
+//Get all the data needed for this query and buffer it in memory
+let RowsForStats = 
+materialize(
+  PowerBIDatasetsWorkspace
+| where TimeGenerated > ago(1d)
+| where OperationName == "ProgressReportEnd"
+| where OperationDetailName == "ExecuteSql" or OperationDetailName == "ReadData" 
+or (OperationDetailName == "TabularRefresh" and (EventText contains "partition"))  
+);
+//Get just the events for the initial SQL execution phase
+let ExecuteSql = 
+RowsForStats
+| where OperationDetailName == "ExecuteSql"
+| project XmlaRequestId, XmlaObjectPath, 
+ExecuteSqlStartTime = format_datetime(TimeGenerated - (DurationMs * 1ms),'yyyy-MM-dd HH:mm:ss.fff' ), 
+ExecuteSqlEndTime = format_datetime(TimeGenerated,'yyyy-MM-dd HH:mm:ss.fff' ), 
+ExecuteSqlDurationMs = DurationMs, ExecuteSqlCpuTimeMs = CpuTimeMs;
+//Get just the events for the data read and calculate rows read per second
+let ReadData =
+RowsForStats
+| where OperationDetailName == "ReadData"
+| project XmlaRequestId, XmlaObjectPath, 
+ReadDataStartTime = format_datetime(TimeGenerated - (DurationMs * 1ms),'yyyy-MM-dd HH:mm:ss.fff' ), 
+ReadDataEndTime = format_datetime(TimeGenerated,'yyyy-MM-dd HH:mm:ss.fff' ), 
+ReadDataDurationMs = DurationMs, ReadDataCpuTime = CpuTimeMs, 
+TotalRowsRead = ProgressCounter, RowsPerSecond = ProgressCounter /(toreal(DurationMs)/1000);
+//Get the events for the overall partition refresh
+let TabularRefresh =
+RowsForStats
+| where OperationDetailName == "TabularRefresh"
+| parse EventText with * '[MashupCPUTime: ' MashupCPUTimeMs:long ' ms, MashupPeakMemory: '  MashupPeakMemoryKB:long ' KB]'
+| project XmlaRequestId, XmlaObjectPath, 
+TabularRefreshStartTime = format_datetime(TimeGenerated - (DurationMs * 1ms),'yyyy-MM-dd HH:mm:ss.fff' ), 
+TabularRefreshEndTime = format_datetime(TimeGenerated,'yyyy-MM-dd HH:mm:ss.fff' ), 
+TabularRefreshDurationMs = DurationMs, TabularRefreshCpuTime = CpuTimeMs, 
+MashupCPUTimeMs, MashupPeakMemoryKB;
+//Do an inner join on the three tables so there is one row per partition per refresh
+ExecuteSql
+| join kind=inner ReadData on XmlaRequestId, XmlaObjectPath
+| join kind=inner TabularRefresh on XmlaRequestId, XmlaObjectPath
+| project-away XmlaRequestId1, XmlaRequestId2, XmlaObjectPath1, XmlaObjectPath2
+| extend Table = tostring(split(XmlaObjectPath,".", 2)[0]), Partition = tostring(split(XmlaObjectPath,".", 3)[0])
+| project-reorder XmlaRequestId, Table, Partition
+| order by XmlaRequestId, ExecuteSqlStartTime desc

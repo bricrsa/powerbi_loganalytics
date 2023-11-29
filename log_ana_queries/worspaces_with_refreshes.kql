@@ -1,0 +1,8 @@
+PowerBIDatasetsWorkspace
+| where (OperationName == 'ProgressReportEnd') // Refreshes
+| extend TextDataHash = hash(EventText)
+| extend DurationMs = coalesce(DurationMs, 0)
+| extend Microsecond = datetime_part("microsecond",TimeGenerated)
+| distinct ApplicationName, CpuTimeMs, ArtifactId, ArtifactName, ArtifactKind, DatasetMode, DurationMs, EventText, ExecutingUser, OperationDetailName, OperationName, PremiumCapacityId, SourceSystem, Status, StatusCode, TenantId, TextDataHash, TimeGenerated, Microsecond, Type, User, PowerBIWorkspaceId, PowerBIWorkspaceName, XmlaRequestId, XmlaSessionId, XmlaObjectPath, _ResourceId, _SubscriptionId
+| project ApplicationName, CpuTimeMs, DatasetId = ArtifactId, Dataset = ArtifactName, ArtifactKind, DatasetMode, ['Duration (ms)'] = DurationMs, EventText, ExecutingUser, OperationDetailName, OperationName, PremiumCapacityId, SourceSystem, Status, StatusCode, TenantId, TextDataHash, TimeGenerated, Microsecond, Type, User, PowerBIWorkspaceId, PowerBIWorkspaceName, XmlaRequestId, XmlaSessionId, XmlaObjectPath, ResourceId = _ResourceId, SubscriptionId = _SubscriptionId, StartTime = TimeGenerated
+| summarize Duration_Seconds = sum(Microsecond)/1000000.0 by Type, PowerBIWorkspaceId, PowerBIWorkspaceName,PremiumCapacityId, bin(TimeGenerated,1h)

@@ -1,0 +1,15 @@
+let
+    StartValue = (#"Days Ago To Start") - 1,
+    Source = List.Generate(() => StartValue, each _ > #"Days Ago To Finish"-1, each _ - 1),
+    #"Converted to Table" = Table.FromList(Source, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    #"Added Custom3" = Table.AddColumn(#"Converted to Table", "Hours", each List.Generate(() => 24-(#"Pagination Hours"), each _> -1, each _ -#"Pagination Hours")),
+    #"Expanded Custom" = Table.ExpandListColumn(#"Added Custom3", "Hours"),
+    #"Renamed Columns" = Table.RenameColumns(#"Expanded Custom",{{"Column1", "Ago"}}),
+    #"Invoked Custom Function" = Table.AddColumn(#"Renamed Columns", "GetLogAnalytics_AS", each fnGetRefreshSuboperations([Ago], [Ago],[Hours],#"Pagination Hours", #"Log Analytics Table", #"UTC Offset Hours")),
+    #"Expanded GetLogAnalytics_AS1" = Table.ExpandTableColumn(#"Invoked Custom Function", "GetLogAnalytics_AS", {"ApplicationName", "CpuTimeMs", "DatasetId", "Dataset", "ArtifactKind", "DatasetMode", "Duration (ms)", "EventText", "ExecutingUser", "OperationDetailName", "OperationName", "PremiumCapacityId", "SourceSystem", "Status", "StatusCode", "TenantId", "TextDataHash", "Microsecond", "Type", "User", "PowerBIWorkspaceId", "PowerBIWorkspaceName", "XmlaRequestId", "XmlaSessionId", "XmlaObjectPath", "ResourceId", "SubscriptionId", "StartTime", "TimeGenerated"}, {"ApplicationName", "CpuTimeMs", "DatasetId", "Dataset", "ArtifactKind", "DatasetMode", "Duration (ms)", "EventText", "ExecutingUser", "OperationDetailName", "OperationName", "PremiumCapacityId", "SourceSystem", "Status", "StatusCode", "TenantId", "TextDataHash", "Microsecond", "Type", "User", "WorkspaceId", "WorkspaceName", "XmlaRequestId", "XmlaSessionId", "XmlaObjectPath", "ResourceId", "SubscriptionId", "StartTime", "TimeGenerated"}),
+    #"Removed Columns" = Table.RemoveColumns(#"Expanded GetLogAnalytics_AS1",{"Ago","Hours"}),
+    #"Removed Duplicates" = Table.Distinct(#"Removed Columns"),
+    #"Removed Blank Rows" = Table.SelectRows(#"Removed Duplicates", each not List.IsEmpty(List.RemoveMatchingItems(Record.FieldValues(_), {"", null})))
+    
+in
+    #"Removed Blank Rows"

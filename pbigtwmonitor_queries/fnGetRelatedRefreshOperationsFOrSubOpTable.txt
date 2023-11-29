@@ -1,0 +1,59 @@
+let
+    Source = (#"Days Ago To Start" as number, #"Days Ago To Finish" as number, #"Hours" as number,#"Pagination Hours" as number, #"Log Analytics Table" as text, #"UTC Offset Hours" as number) => let AnalyticsQuery =
+let Source = Json.Document(Web.Contents("https://api.loganalytics.io/v1/workspaces/" & GetWorkspaceId & "/query", 
+[Query=[#"query"="
+ // Refreshes can contain several CommandEnd and DiscoveryEnd events that share the same rootActivityId. This report's data model typically has these in the Operation table, however
+    // to keep these events grouped together as related to a refresh we move such events to the Suboperation table.
+    set notruncation;
+    let workspaceIdList = dynamic(['50EA7149-43DC-4DE3-8E56-4D5DBBC83E8F', 'C839BDCB-81B5-4DC3-9F92-818FE71432A1', '80FA5101-D77B-4AC3-B86A-EEAFE28E64AC']);
+    
+    let startDate = startofday(ago(" & Number.ToText(#"Days Ago To Start") & "d))- "& Number.ToText(#"UTC Offset Hours" * 60) & "m ;
+    let startIngestionTime = datetime_add('hour', " & Number.ToText(#"Hours") & ",todatetime(startDate));
+    let endIngestionTime = datetime_add('hour', " & Number.ToText(#"Pagination Hours") & ",todatetime(startIngestionTime));
+
+    let relatedRefreshEvents = "& #"Log Analytics Table" & "
+    | where (TimeGenerated >= startIngestionTime and TimeGenerated < endIngestionTime) 
+    | where ((OperationName in ('DiscoverEnd', 'QueryEnd', 'Error', 'Deadlock', 'SessionInitialize')) or (OperationName  == 'CommandEnd' and not(EventText contains_cs '<Refresh xmlns=' and OperationDetailName == 'Batch'))) and XmlaRequestId  in (
+    // Subquery that returns rootActivityIds of all refresh operations. We expand the window -- NEED TO TEST IF  +/- 24h IS NECESSARY
+    ("& #"Log Analytics Table" & " 
+    | where (TimeGenerated >= startIngestionTime - 24h and TimeGenerated < endIngestionTime + 24h) // create a window in case these events happen outside of the base event's StartTime
+    | where OperationName  == 'CommandEnd'
+    | where OperationDetailName == 'Batch'
+    | where EventText contains_cs '<Refresh xmlns=' 
+    | project XmlaRequestId
+    )
+    )
+    ;
+    relatedRefreshEvents
+    | extend TextDataHash = hash(EventText)
+    | extend DurationMs = coalesce(DurationMs, 0)
+    | extend User = iff(toupper(PowerBIWorkspaceId) in (workspaceIdList), hash_md5(User), User)
+    | extend ExecutingUser = iff(toupper(PowerBIWorkspaceId) in (workspaceIdList), hash_md5(ExecutingUser), ExecutingUser)
+| distinct ApplicationName, CpuTimeMs, ArtifactId, ArtifactName, ArtifactKind, DatasetMode, DurationMs, EventText, ExecutingUser, OperationDetailName, OperationName, PremiumCapacityId, SourceSystem, Status, StatusCode, TenantId, TextDataHash, TimeGenerated, Type, User, PowerBIWorkspaceId, PowerBIWorkspaceName, XmlaRequestId, XmlaObjectPath, XmlaSessionId, _ResourceId, _SubscriptionId
+| project ApplicationName, CpuTimeMs, DatasetId = ArtifactId, Dataset = ArtifactName, ArtifactKind, DatasetMode, ['Duration (ms)'] = DurationMs, EventText, ExecutingUser, OperationDetailName, OperationName, PremiumCapacityId, SourceSystem, Status, StatusCode, TenantId, TextDataHash, StartTime = TimeGenerated,Microsecond=datetime_part(""microsecond"",TimeGenerated), Type, User, PowerBIWorkspaceId, PowerBIWorkspaceName, XmlaRequestId, XmlaObjectPath, XmlaSessionId,  ResourceId = _ResourceId, SubscriptionId = _SubscriptionId 
+    "],Timeout=#duration(0,0,60,0)])),
+TypeMap = #table(
+{ "AnalyticsTypes", "Type" }, 
+{ 
+{ "string",   Text.Type },
+{ "int",      Int32.Type },
+{ "long",     Int64.Type },
+{ "real",     Double.Type },
+{ "timespan", Duration.Type },
+{ "datetime", DateTimeZone.Type },
+{ "bool",     Logical.Type },
+{ "guid",     Text.Type },
+{ "dynamic",  Text.Type }
+}),
+DataTable = Source[tables]{0},
+Columns = Table.FromRecords(DataTable[columns]),
+ColumnsWithType = Table.Join(Columns, {"type"}, TypeMap , {"AnalyticsTypes"}),
+Rows = Table.FromRows(DataTable[rows], Columns[name]), 
+Table = Table.TransformColumnTypes(Rows, Table.ToList(ColumnsWithType, (c) => { c{0}, c{3}}))
+in
+Table
+         
+in
+    AnalyticsQuery
+in
+    Source

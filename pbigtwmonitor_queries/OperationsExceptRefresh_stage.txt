@@ -1,0 +1,14 @@
+let
+    StartValue = (#"Days Ago To Start") - 1,
+    Source = List.Generate(() => StartValue, each _ > #"Days Ago To Finish"-1, each _ - 1),
+    #"Converted to Table" = Table.FromList(Source, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    #"Added Custom3" = Table.AddColumn(#"Converted to Table", "Hours", each List.Generate(() => 24-(#"Pagination Hours"), each _> -1, each _ -#"Pagination Hours")),
+    #"Expanded Custom" = Table.ExpandListColumn(#"Added Custom3", "Hours"),
+    #"Renamed Columns" = Table.RenameColumns(#"Expanded Custom",{{"Column1", "Ago"}}),
+    #"Invoked Custom Function" = Table.AddColumn(#"Renamed Columns", "fnGetEvents", each fnGetOperationsExceptRefreshes([Ago], [Ago],[Hours],#"Pagination Hours", #"Log Analytics Table",  #"UTC Offset Hours")),
+    #"Removed Columns" = Table.RemoveColumns(#"Invoked Custom Function",{"Ago", "Hours"}),
+    #"Expanded fnGetEvents" = Table.ExpandTableColumn(#"Removed Columns", "fnGetEvents", {"ApplicationName", "CpuTimeMs", "DatasetId", "Dataset", "ArtifactKind", "DatasetMode", "Duration (ms)", "EventText", "ExecutingUser", "OperationDetailName", "OperationName", "PremiumCapacityId", "ReportId", "SourceSystem", "Status", "StatusCode", "TenantId", "TextDataHash", "Type", "User", "PowerBIWorkspaceId", "PowerBIWorkspaceName", "XmlaRequestId", "XmlaSessionId", "ResourceId", "SubscriptionId", "QuerySubeventKey", "StartTime"}, {"ApplicationName", "CpuTimeMs", "DatasetId", "Dataset", "ArtifactKind", "DatasetMode", "Duration (ms)", "EventText", "ExecutingUser", "OperationDetailName", "OperationName", "PremiumCapacityId", "ReportId", "SourceSystem", "Status", "StatusCode", "TenantId", "TextDataHash", "Type", "User", "WorkspaceId", "WorkspaceName", "XmlaRequestId", "XmlaSessionId", "ResourceId", "SubscriptionId", "QuerySubeventKey", "StartTime"}),
+    #"Removed Blank Rows" = Table.SelectRows(#"Expanded fnGetEvents", each not List.IsEmpty(List.RemoveMatchingItems(Record.FieldValues(_), {"", null})))
+    
+in
+    #"Removed Blank Rows"
