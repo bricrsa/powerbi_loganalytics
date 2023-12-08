@@ -3,6 +3,7 @@ Monitoring Fabric and PowerBI with Log Analytics
 
 Collection of found and created resources for monitoring PowerBI and other Fabric workloads
 
+List of PowerBI events documented [here](https://learn.microsoft.com/en-us/power-bi/transform-model/log-analytics/desktop-log-analytics-configure#events-and-schema).
 
 Useful repos: 
 - [PBI Cookbook](https://github.com/lipinght/PBICookbook)
